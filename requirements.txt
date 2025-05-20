@@ -1,0 +1,6 @@
+streamlit 
+langchain 
+chromadb 
+sentence-transformers 
+openai 
+pymupdf
