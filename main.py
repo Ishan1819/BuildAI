@@ -104,8 +104,8 @@ def generate_response(query, conversation_history):
             return "API key not found in session state. Please reconfigure."
             
         # Check if LangChain GoogleGenerativeAI is available
-        if not 'LANGCHAIN_GENAI_AVAILABLE' in globals() or not LANGCHAIN_GENAI_AVAILABLE:
-            return "Error: langchain_google_genai module is not available. Please ensure it's installed properly."
+        # if not 'LANGCHAIN_GENAI_AVAILABLE' in globals() or not LANGCHAIN_GENAI_AVAILABLE:
+        #     return "Error: langchain_google_genai module is not available. Please ensure it's installed properly."
 
         # Setup Prompt
         custom_prompt = PromptTemplate(
@@ -114,7 +114,7 @@ def generate_response(query, conversation_history):
         )
 
         # Import here to ensure it's available
-        from langchain_google_genai import GoogleGenerativeAI
+        # from langchain_google_genai import GoogleGenerativeAI
         llm = GoogleGenerativeAI(model="models/gemini-1.5-flash", google_api_key=api_key)
         retriever = vectordb.as_retriever(search_kwargs={"k": 3})
 
@@ -154,10 +154,14 @@ def main():
                 st.session_state.gemini_api_key = api_key
                 st.success("API Key configured!")
             except Exception as e:
-                st.error(f"API Key Error: {str(e)}")
+                st.error(f"API Key Error: {str(e)}")    
                 st.session_state.api_key_configured = False
 
-        st.status("Configured ✓" if st.session_state.api_key_configured else "Not Configured ✗")
+        if st.session_state.api_key_configured:
+            st.success("API Key Status: Configured ✓")
+        else:
+            st.error("API Key Status: Not Configured ✗")
+            st.info("Get a key from https://ai.google.dev/")
         st.divider()
 
         st.header("Upload PDF")
