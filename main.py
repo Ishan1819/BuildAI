@@ -1,22 +1,34 @@
-import streamlit as st
-import fitz  # PyMuPDF
-import chromadb
-import google.generativeai as genai
+# Import only what we need
+import sys
 import os
 import datetime
+import streamlit as st
+import fitz  # PyMuPDF
 
-# LangChain-related imports
+# ✅ MUST be the first Streamlit command
+st.set_page_config(page_title="RAG CHATBOT", page_icon="👶", layout="wide")
+
+# Fix for older sqlite3 in environments like Streamlit Cloud
+try:
+    import pysqlite3
+    sys.modules["sqlite3"] = pysqlite3
+except ImportError:
+    print("pysqlite3 not found; using system sqlite3")
+
+import google.generativeai as genai
+
+# LangChain imports
 from langchain_google_genai import GoogleGenerativeAI
 from langchain.chains import RetrievalQA
 from langchain.vectorstores import Chroma
 from langchain.embeddings import HuggingFaceEmbeddings
 from langchain.prompts import PromptTemplate
 
-# Fix PyTorch dynamic linking
+# PyTorch dynamic linking fix
 os.environ["TORCH_USE_RTLD_GLOBAL"] = "YES"
 os.environ["STREAMLIT_SERVER_WATCH_DELAY"] = "3"
 
-# Load sentence-transformers for embedding
+# Load SentenceTransformer
 try:
     from sentence_transformers import SentenceTransformer
     embedding_model = SentenceTransformer('all-MiniLM-L6-v2')
@@ -26,19 +38,27 @@ except Exception as e:
     HAS_SENTENCE_TRANSFORMERS = False
     embedding_model = None
 
-# Setup ChromaDB
+# LangChain Embedding (initialize first before ChromaDB)
+lc_embedding_model = HuggingFaceEmbeddings(model_name="all-MiniLM-L6-v2")
+from langchain.vectorstores import Chroma
+
+# Updated ChromaDB initialization to fix deprecation warning
+# Using the newer initialization pattern directly with Langchain
 try:
-    chroma_client = chromadb.Client()
-    collection = chroma_client.get_or_create_collection(name="pregnancy_docs")
+    # Initialize ChromaDB through LangChain's Chroma
+    vectordb = Chroma(
+        persist_directory="./chroma_db",
+        collection_name="pregnancy_docs",
+        embedding_function=lc_embedding_model
+    )
+    collection = vectordb._collection  # Access the underlying ChromaDB collection if needed
 except Exception as e:
     st.error(f"Error initializing ChromaDB: {str(e)}")
+    vectordb = None
     collection = None
 
-# LangChain Embedding Wrapper
-lc_embedding_model = HuggingFaceEmbeddings(model_name="all-MiniLM-L6-v2")
-vectordb = Chroma(client=chroma_client, collection_name="pregnancy_docs", embedding_function=lc_embedding_model)
 
-# PDF Text Extraction
+# Extract PDF Text
 def extract_text_from_pdf(pdf_file):
     try:
         doc = fitz.open(stream=pdf_file.read(), filetype="pdf")
@@ -50,17 +70,22 @@ def extract_text_from_pdf(pdf_file):
 # Add to ChromaDB
 def add_text_to_chroma(text, doc_id):
     try:
-        embedding = embedding_model.encode(text).tolist()
-        existing_ids = set(collection.get()["ids"])
-        if doc_id in existing_ids:
-            collection.delete(ids=[doc_id])
-        collection.add(ids=[doc_id], documents=[text], embeddings=[embedding])
+        if vectordb is None:
+            st.error("Vector database not initialized.")
+            return False
+            
+        # Using LangChain's add_texts method instead of direct ChromaDB access
+        vectordb.add_texts(
+            texts=[text],
+            ids=[doc_id],
+            metadatas=[{"source": doc_id}]
+        )
         return True
     except Exception as e:
         st.error(f"ChromaDB Insertion Error: {str(e)}")
         return False
 
-# Custom QA Prompt Template with System Prompt
+# Prompt Template
 CUSTOM_PROMPT_TEMPLATE = """
 SYSTEM: You are a helpful assistant that provides information from the provided documents. 
 Follow these rules strictly:
@@ -77,18 +102,17 @@ QUESTION: {question}
 YOUR RESPONSE (in bullet points, strictly based on the provided context):
 """
 
-# LangChain + Gemini QA
+# Gemini + LangChain QA
 def generate_response(query, conversation_history):
     try:
         if not st.session_state.get("api_key_configured", False):
             return "Please configure your Gemini API key in the sidebar first."
-            
-        # Get API key from session state
+
         api_key = st.session_state.get("gemini_api_key", "")
         if not api_key:
             return "API key not found in session state. Please reconfigure."
 
-        # Create custom prompt
+        # Setup Prompt
         custom_prompt = PromptTemplate(
             template=CUSTOM_PROMPT_TEMPLATE,
             input_variables=["context", "question"]
@@ -96,42 +120,33 @@ def generate_response(query, conversation_history):
 
         llm = GoogleGenerativeAI(model="models/gemini-1.5-flash", google_api_key=api_key)
         retriever = vectordb.as_retriever(search_kwargs={"k": 3})
-        
-        # Use custom prompt in QA chain
+
         qa_chain = RetrievalQA.from_chain_type(
             llm=llm,
             retriever=retriever,
             chain_type_kwargs={"prompt": custom_prompt}
         )
-        
-        response = qa_chain.run(query)
-        return response.strip()
+
+        return qa_chain.run(query).strip()
     except Exception as e:
         st.error(f"LangChain QA Error: {str(e)}")
         return f"Error: {str(e)}"
 
-# Generate unique doc ID
 def generate_doc_id(filename):
     timestamp = datetime.datetime.now().strftime("%Y%m%d%H%M%S")
     return f"{filename}_{timestamp}"
 
-# Main UI
+# Main App
 def main():
-    st.set_page_config(page_title="RAG CHATBOT", page_icon="👶", layout="wide")
-    st.title("Streamlit based RAG Application")
-    st.markdown("Upload PDF and ask questions.")
+    st.title("Welcome to the Pregnancy Guidance Chatbot")
+    st.markdown("Upload PDFs and ask questions.")
 
-    # Init session state
-    if "conversation_history" not in st.session_state:
-        st.session_state.conversation_history = []
-    if "documents_uploaded" not in st.session_state:
-        st.session_state.documents_uploaded = []
-    if "api_key_configured" not in st.session_state:
-        st.session_state.api_key_configured = False
-    if "gemini_api_key" not in st.session_state:
-        st.session_state.gemini_api_key = ""
+    # Session state init
+    for key in ["conversation_history", "documents_uploaded", "api_key_configured", "gemini_api_key"]:
+        if key not in st.session_state:
+            st.session_state[key] = [] if "history" in key or "documents" in key else False if "configured" in key else ""
 
-    # Sidebar: API + Upload
+    # Sidebar
     with st.sidebar:
         st.header("Configuration")
         api_key = st.text_input("Enter your Gemini API key", type="password")
@@ -150,13 +165,13 @@ def main():
         else:
             st.error("API Key Status: Not Configured ✗")
             st.info("Get a key from https://ai.google.dev/")
-
+            
         st.divider()
         st.header("Upload PDF")
         uploaded_files = st.file_uploader("Upload PDF", type=["pdf"], accept_multiple_files=True)
 
         if uploaded_files:
-            if not collection:
+            if vectordb is None:
                 st.error("ChromaDB not ready.")
             elif st.button("Process Document"):
                 with st.spinner("Processing..."):
@@ -172,38 +187,34 @@ def main():
                                 st.success(f"Uploaded: {pdf_file.name}")
 
         if st.session_state.documents_uploaded:
-            st.subheader("Processed File")
+            st.subheader("Processed Files")
             for doc in st.session_state.documents_uploaded:
                 st.write(f"- {doc}")
             if st.button("Clear All Document"):
                 try:
-                    ids = collection.get().get("ids", [])
-                    if ids:
-                        collection.delete(ids=ids)
+                    # Using LangChain's method to delete all
+                    vectordb.delete(vectordb.get().get("ids", []))
                     st.session_state.documents_uploaded = []
                     st.success("Cleared all documents.")
                 except Exception as e:
                     st.error(f"Clear Error: {str(e)}")
 
-    # Chat and QA interface
+    # Main chat UI
     col1, col2 = st.columns([2, 1])
     with col1:
         st.header("Ask Questions")
         with st.container(height=400, border=True):
             for i, message in enumerate(st.session_state.conversation_history):
-                if i % 2 == 0:
-                    st.chat_message("user").write(message)
-                else:
-                    st.chat_message("assistant").markdown(message)
+                (st.chat_message("user") if i % 2 == 0 else st.chat_message("assistant")).write(message)
 
     with col2:
         st.header("Instructions")
         st.markdown("""
         1. Get a Gemini API key from [Google AI Studio](https://ai.google.dev/)
         2. Paste and save your key in the sidebar
-        3. Upload PDF of any domain you want
-        4. Click "Process Documents"
-        5. Ask anything questions about the uploaded documents
+        3. Upload one or more PDFs
+        4. Click "Process Document"
+        5. Ask questions based on uploaded content
         """)
 
     query = st.chat_input("Ask some questions")
@@ -215,7 +226,7 @@ def main():
             response = "Please configure your Gemini API key in the sidebar."
         elif not st.session_state.documents_uploaded:
             response = "Please upload a document first."
-        elif not collection:
+        elif vectordb is None:
             response = "Database not initialized."
         else:
             with st.spinner("Retrieving and generating answer..."):

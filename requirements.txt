@@ -6,3 +6,8 @@ openai
 pymupdf
 google.generativeai
 
+# streamlit
+chromadb[all]
+# pysqlite3
+# PyMuPDF
+google-generativeai
