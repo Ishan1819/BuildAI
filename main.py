@@ -1,14 +1,11 @@
-# Import only what we need
+
 import sys
 import os
 import datetime
 import streamlit as st
-import fitz  # PyMuPDF
+import fitz  
 
-# ✅ MUST be the first Streamlit command
 st.set_page_config(page_title="RAG CHATBOT", page_icon="👶", layout="wide")
-
-# Fix for older sqlite3 in environments like Streamlit Cloud
 try:
     import pysqlite3
     sys.modules["sqlite3"] = pysqlite3
@@ -24,11 +21,9 @@ from langchain.vectorstores import Chroma
 from langchain.embeddings import HuggingFaceEmbeddings
 from langchain.prompts import PromptTemplate
 
-# PyTorch dynamic linking fix
 os.environ["TORCH_USE_RTLD_GLOBAL"] = "YES"
 os.environ["STREAMLIT_SERVER_WATCH_DELAY"] = "3"
 
-# Load SentenceTransformer
 try:
     from sentence_transformers import SentenceTransformer
     embedding_model = SentenceTransformer('all-MiniLM-L6-v2')
@@ -38,27 +33,22 @@ except Exception as e:
     HAS_SENTENCE_TRANSFORMERS = False
     embedding_model = None
 
-# LangChain Embedding (initialize first before ChromaDB)
 lc_embedding_model = HuggingFaceEmbeddings(model_name="all-MiniLM-L6-v2")
 from langchain.vectorstores import Chroma
 
-# Updated ChromaDB initialization to fix deprecation warning
-# Using the newer initialization pattern directly with Langchain
 try:
-    # Initialize ChromaDB through LangChain's Chroma
     vectordb = Chroma(
         persist_directory="./chroma_db",
         collection_name="pregnancy_docs",
         embedding_function=lc_embedding_model
     )
-    collection = vectordb._collection  # Access the underlying ChromaDB collection if needed
+    collection = vectordb._collection  
 except Exception as e:
     st.error(f"Error initializing ChromaDB: {str(e)}")
     vectordb = None
     collection = None
 
 
-# Extract PDF Text
 def extract_text_from_pdf(pdf_file):
     try:
         doc = fitz.open(stream=pdf_file.read(), filetype="pdf")
