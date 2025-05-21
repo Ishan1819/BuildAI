@@ -5,19 +5,22 @@ import datetime
 import streamlit as st
 import fitz  
 
-st.set_page_config(page_title="RAG CHATBOT", page_icon="👶", layout="wide")
+# IMPORTANT: This SQLite replacement MUST happen before any other imports
 try:
-    import pysqlite3
-    sys.modules["sqlite3"] = pysqlite3
+    import sqlite3
+    sys.modules["sqlite3"] = sqlite3
 except ImportError:
-    print("pysqlite3 not found; using system sqlite3")
+    print("sqlite3 not found; using system sqlite3")
+
+st.set_page_config(page_title="RAG CHATBOT", page_icon="👶", layout="wide")
 
 import google.generativeai as genai
 
 # LangChain imports
 from langchain_google_genai import GoogleGenerativeAI
 from langchain.chains import RetrievalQA
-from langchain.vectorstores import Chroma
+# Use langchain_community instead of langchain for vectorstores
+from langchain_community.vectorstores import Chroma
 from langchain.embeddings import HuggingFaceEmbeddings
 from langchain.prompts import PromptTemplate
 
@@ -35,7 +38,6 @@ except Exception as e:
     embedding_model = None
 
 lc_embedding_model = HuggingFaceEmbeddings(model_name="all-MiniLM-L6-v2")
-from langchain.vectorstores import Chroma
 
 try:
     vectordb = Chroma(
@@ -103,18 +105,12 @@ def generate_response(query, conversation_history):
         if not api_key:
             return "API key not found in session state. Please reconfigure."
             
-        # Check if LangChain GoogleGenerativeAI is available
-        # if not 'LANGCHAIN_GENAI_AVAILABLE' in globals() or not LANGCHAIN_GENAI_AVAILABLE:
-        #     return "Error: langchain_google_genai module is not available. Please ensure it's installed properly."
-
         # Setup Prompt
         custom_prompt = PromptTemplate(
             template=CUSTOM_PROMPT_TEMPLATE,
             input_variables=["context", "question"]
         )
 
-        # Import here to ensure it's available
-        # from langchain_google_genai import GoogleGenerativeAI
         llm = GoogleGenerativeAI(model="models/gemini-1.5-flash", google_api_key=api_key)
         retriever = vectordb.as_retriever(search_kwargs={"k": 3})
 
